@@ -17,12 +17,23 @@ A lightweight Windows desktop app for quick access to your favorite folders. Bui
 - **Remembers window position and size** — restored on next launch
 - **Portable single-file executable** — no installer needed
 
+## Download
+
+Grab the latest release from the [Releases page](https://github.com/H7O/Shortcuts/releases/latest):
+
+- **Shortcuts-win-x64.zip** — for 64-bit Intel/AMD systems (most PCs)
+- **Shortcuts-win-arm64.zip** — for ARM64 devices (e.g. Surface Pro X, Snapdragon laptops)
+
+Extract the zip and run `Shortcuts.exe`. No installation required.
+
 ## Requirements
 
 - Windows 10 or later
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (for building)
+- No runtime installation needed — the app is fully self-contained
 
-## Build
+## Building from Source
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```powershell
 .\build.ps1
