@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -15,11 +16,17 @@ namespace Shortcuts;
 
 public partial class MainWindow : Window
 {
-    private readonly ShortcutStore _store = new();
-    private readonly ObservableCollection<FolderShortcut> _shortcuts = [];
+    private const string ReorderFormat = "ShortcutIndex";
+    private const string DragHandleTag = "DragHandle";   // matches the Tag on the handle in MainWindow.xaml
+    private const int ErrorCancelled = 1223;             // Win32 ERROR_CANCELLED
 
-    private Point _dragStartPoint;
-    private int _dragSourceIndex = -1;
+    private readonly ShortcutStore _store = new();
+    private readonly ObservableCollection<Shortcut> _shortcuts = [];
+
+    // Where the left button last went down in the list: which row (-1 if none), and whether on its drag handle.
+    private Point _pressPoint;
+    private int _pressIndex = -1;
+    private bool _pressOnHandle;
 
     public MainWindow()
     {
@@ -28,6 +35,7 @@ public partial class MainWindow : Window
         var loaded = _store.Load();
         foreach (var s in loaded)
             _shortcuts.Add(s);
+        LoadIcons(loaded);
 
         ShortcutsList.ItemsSource = _shortcuts;
         _shortcuts.CollectionChanged += (_, _) => UpdateEmptyState();
@@ -133,110 +141,253 @@ public partial class MainWindow : Window
         EmptyMessage.Visibility = _shortcuts.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void AddButton_Click(object sender, RoutedEventArgs e)
+    // --- Adding and deleting ---
+
+    private void AddFolderButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
         {
-            Title = "Select a folder to add as a shortcut"
+            Title = "Select folders to add as shortcuts",
+            Multiselect = true
         };
 
         if (dialog.ShowDialog(this) == true)
-        {
-            var path = dialog.FolderName;
-            var name = Path.GetFileName(path);
-            if (string.IsNullOrEmpty(name))
-                name = path;
+            AddShortcuts(dialog.FolderNames);
+    }
 
-            _shortcuts.Add(new FolderShortcut { Name = name, Path = path });
-            _store.Save(_shortcuts);
+    private void AddFileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select files to add as shortcuts",
+            Multiselect = true
+        };
+
+        if (dialog.ShowDialog(this) == true)
+            AddShortcuts(dialog.FileNames);
+    }
+
+    /// <summary>Adds a shortcut for each path, at the end of the list or starting at <paramref name="insertAt"/>.</summary>
+    private void AddShortcuts(IEnumerable<string> paths, int? insertAt = null)
+    {
+        var index = insertAt ?? _shortcuts.Count;
+        var added = new List<Shortcut>();
+
+        foreach (var path in paths)
+        {
+            var shortcut = new Shortcut
+            {
+                Name = DisplayName(path),
+                Path = path,
+                Kind = Directory.Exists(path) ? ShortcutKind.Folder : ShortcutKind.File
+            };
+            _shortcuts.Insert(index++, shortcut);
+            added.Add(shortcut);
         }
+
+        if (added.Count == 0)
+            return;
+
+        _store.Save(_shortcuts);
+        LoadIcons(added);
+        ShortcutsList.ScrollIntoView(added[^1]);
+    }
+
+    private static string DisplayName(string path)
+    {
+        // Explorer never shows the extension of its own shortcut files, so leave it off here too.
+        var extension = Path.GetExtension(path);
+        var isShellLink = extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals(".url", StringComparison.OrdinalIgnoreCase);
+
+        var name = isShellLink ? Path.GetFileNameWithoutExtension(path) : Path.GetFileName(path);
+
+        // A drive root such as C:\ has no file name.
+        return string.IsNullOrEmpty(name) ? path : name;
+    }
+
+    private void LoadIcons(IReadOnlyList<Shortcut> shortcuts)
+    {
+        // Icon lookups read the disk and can stall on an unreachable network path, so they run
+        // off the UI thread. The shell expects to be called from an STA thread.
+        var thread = new Thread(() =>
+        {
+            foreach (var shortcut in shortcuts)
+            {
+                try
+                {
+                    var icon = ShellIconHelper.GetIcon(shortcut.Path, shortcut.Kind == ShortcutKind.Folder);
+                    if (icon != null)
+                        Dispatcher.BeginInvoke(() => shortcut.Icon = icon);
+                }
+                catch (Exception)
+                {
+                    // An icon is decoration. A row without one still works, so never let this take the app down.
+                }
+            }
+        })
+        {
+            IsBackground = true
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
     }
 
     private void DeleteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button btn && btn.DataContext is FolderShortcut shortcut)
+        if (sender is Button btn && btn.DataContext is Shortcut shortcut)
         {
             _shortcuts.Remove(shortcut);
             _store.Save(_shortcuts);
         }
     }
 
-    private void ShortcutsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    // --- Opening ---
+
+    /// <summary>Opens the shortcut's target. Returns false, after telling the user why, if it could not be opened.</summary>
+    private bool Open(Shortcut shortcut)
     {
-        if (ShortcutsList.SelectedItem is FolderShortcut shortcut)
+        var path = shortcut.Path;
+        var isFolder = Directory.Exists(path);
+
+        if (!isFolder && !File.Exists(path))
         {
-            if (Directory.Exists(shortcut.Path))
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = shortcut.Path,
-                    UseShellExecute = true
-                });
-            }
-            else
-            {
-                MessageBox.Show(
-                    $"The folder no longer exists:\n{shortcut.Path}",
-                    "Folder Not Found",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-            }
+            var (what, title) = shortcut.Kind == ShortcutKind.File
+                ? ("file", "File Not Found")
+                : ("folder", "Folder Not Found");
+
+            MessageBox.Show(this, $"The {what} no longer exists:\n{path}", title,
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        };
+
+        // Start a file in its own folder, as Explorer does, so scripts and programs find what sits next to them.
+        if (!isFolder)
+            startInfo.WorkingDirectory = Path.GetDirectoryName(path) ?? string.Empty;
+
+        try
+        {
+            Process.Start(startInfo)?.Dispose();
+            return true;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorCancelled)
+        {
+            // The user backed out of a Windows prompt, such as the elevation prompt. Nothing to report.
+            return false;
+        }
+        catch (Win32Exception ex)
+        {
+            MessageBox.Show(this, $"Could not open:\n{path}\n\n{ex.Message}", "Could Not Open",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
         }
     }
 
-    // --- Drag and Drop reordering ---
+    // --- Mouse handling: click a row to open it, drag its handle to reorder ---
 
     private void ShortcutsList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _dragStartPoint = e.GetPosition(null);
+        var source = e.OriginalSource as DependencyObject;
 
-        // Determine which item index we're clicking on
-        if (GetListBoxItemIndex(e.OriginalSource as DependencyObject) is int index)
-            _dragSourceIndex = index;
-        else
-            _dragSourceIndex = -1;
+        _pressPoint = e.GetPosition(null);
+        _pressOnHandle = IsOnDragHandle(source);
+
+        // A press on the delete button belongs to the button, not to the row.
+        _pressIndex = IsOnButton(source) ? -1 : GetRowIndex(source) ?? -1;
+    }
+
+    private void ShortcutsList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var pressIndex = _pressIndex;
+        var pressOnHandle = _pressOnHandle;
+        _pressIndex = -1;
+        _pressOnHandle = false;
+
+        // The handle is only for dragging, so a click on it does not open the row.
+        if (pressIndex < 0 || pressIndex >= _shortcuts.Count || pressOnHandle)
+            return;
+
+        // Count it as a click only if the button comes up on the row it went down on.
+        var source = e.OriginalSource as DependencyObject;
+        if (IsOnDragHandle(source) || IsOnButton(source) || GetRowIndex(source) != pressIndex)
+            return;
+
+        var shortcut = _shortcuts[pressIndex];
+        var keepWindowOpen = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+
+        // Let the list finish handling this click before a message box or Close() interrupts it.
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (Open(shortcut) && !keepWindowOpen)
+                Close();
+        });
     }
 
     private void ShortcutsList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed || _dragSourceIndex < 0)
+        if (e.LeftButton != MouseButtonState.Pressed || !_pressOnHandle || _pressIndex < 0)
             return;
 
-        var pos = e.GetPosition(null);
-        var diff = _dragStartPoint - pos;
+        var diff = _pressPoint - e.GetPosition(null);
 
         if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance)
             return;
 
-        // Don't start drag if the click was on the delete button
-        if (e.OriginalSource is DependencyObject dep && IsDeleteButton(dep))
-            return;
+        var sourceIndex = _pressIndex;
+        _pressIndex = -1;
+        _pressOnHandle = false;
 
-        var data = new DataObject("ShortcutIndex", _dragSourceIndex);
-        DragDrop.DoDragDrop(ShortcutsList, data, DragDropEffects.Move);
+        DragDrop.DoDragDrop(ShortcutsList, new DataObject(ReorderFormat, sourceIndex), DragDropEffects.Move);
+    }
+
+    // --- Drops: one of our own rows being reordered, or files and folders dragged in from Explorer ---
+
+    private static DragDropEffects DropEffect(DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(ReorderFormat))
+            return DragDropEffects.Move;
+
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            return e.AllowedEffects.HasFlag(DragDropEffects.Link) ? DragDropEffects.Link : DragDropEffects.Copy;
+
+        return DragDropEffects.None;
     }
 
     private void ShortcutsList_DragOver(object sender, DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent("ShortcutIndex"))
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
-            return;
-        }
-        e.Effects = DragDropEffects.Move;
+        e.Effects = DropEffect(e);
         e.Handled = true;
     }
 
     private void ShortcutsList_Drop(object sender, DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent("ShortcutIndex"))
-            return;
+        // Always report the effect back. Left alone it can read as "moved", and Explorer deletes
+        // the originals of files it believes were moved.
+        e.Effects = DropEffect(e);
+        e.Handled = true;
 
-        int sourceIndex = (int)e.Data.GetData("ShortcutIndex")!;
-        int targetIndex = GetListBoxItemIndex(e.OriginalSource as DependencyObject) ?? _shortcuts.Count - 1;
+        var targetIndex = GetRowIndex(e.OriginalSource as DependencyObject);
 
+        if (e.Data.GetDataPresent(ReorderFormat))
+        {
+            var sourceIndex = (int)e.Data.GetData(ReorderFormat)!;
+            MoveShortcut(sourceIndex, targetIndex ?? _shortcuts.Count - 1);
+        }
+        else if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            AddShortcuts(paths, targetIndex);
+        }
+    }
+
+    private void MoveShortcut(int sourceIndex, int targetIndex)
+    {
         if (sourceIndex < 0 || sourceIndex >= _shortcuts.Count)
             return;
         if (targetIndex < 0)
@@ -248,25 +399,31 @@ public partial class MainWindow : Window
         _store.Save(_shortcuts);
     }
 
-    private int? GetListBoxItemIndex(DependencyObject? source)
+    // --- Working out what in the list a mouse event landed on ---
+
+    private int? GetRowIndex(DependencyObject? source) =>
+        FindAncestor(source, d => d is ListBoxItem) is ListBoxItem item
+            ? ShortcutsList.ItemContainerGenerator.IndexFromContainer(item)
+            : null;
+
+    private bool IsOnDragHandle(DependencyObject? source) =>
+        FindAncestor(source, d => d is FrameworkElement { Tag: DragHandleTag }) != null;
+
+    private bool IsOnButton(DependencyObject? source) =>
+        FindAncestor(source, d => d is Button) != null;
+
+    /// <summary>Walks up from the element under the mouse towards the list and returns the first match.</summary>
+    private DependencyObject? FindAncestor(DependencyObject? source, Func<DependencyObject, bool> match)
     {
         while (source != null && source != ShortcutsList)
         {
-            if (source is ListBoxItem item)
-                return ShortcutsList.ItemContainerGenerator.IndexFromContainer(item);
-            source = VisualTreeHelper.GetParent(source);
+            if (match(source))
+                return source;
+
+            source = source is Visual
+                ? VisualTreeHelper.GetParent(source)
+                : LogicalTreeHelper.GetParent(source);
         }
         return null;
-    }
-
-    private static bool IsDeleteButton(DependencyObject? source)
-    {
-        while (source != null)
-        {
-            if (source is Button btn && btn.ToolTip as string == "Delete shortcut")
-                return true;
-            source = VisualTreeHelper.GetParent(source);
-        }
-        return false;
     }
 }

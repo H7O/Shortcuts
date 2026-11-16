@@ -1,6 +1,6 @@
-# Folder Shortcuts
+# Shortcuts
 
-A lightweight Windows desktop app for quick access to your favorite folders. Built with C# / WPF / .NET 10.
+A lightweight Windows desktop app for quick access to your favorite folders and files. Built with C# / WPF / .NET 10.
 
 ![Dark mode](https://img.shields.io/badge/dark%20mode-supported-blue)
 ![Single instance](https://img.shields.io/badge/single%20instance-yes-green)
@@ -8,10 +8,11 @@ A lightweight Windows desktop app for quick access to your favorite folders. Bui
 
 ## Features
 
-- **Add folder shortcuts** — pick any folder via the native Windows dialog
-- **Open folders** — double-click a shortcut to open it in Explorer
+- **Folder and file shortcuts** — add them with the **Add Folder** and **Add File** buttons, or drag them in from Explorer
+- **One-click open** — click a shortcut to open it; folders open in Explorer and files in their default app
+- **Gets out of the way** — the window closes once the shortcut has opened; hold <kbd>Ctrl</kbd> while clicking to keep it open
 - **Delete shortcuts** — remove any shortcut with one click
-- **Drag-and-drop reordering** — arrange shortcuts in any order
+- **Drag-and-drop reordering** — drag a shortcut by the handle on its left edge
 - **Dark mode aware** — automatically follows the Windows theme, including the title bar
 - **Single instance** — launching again brings the existing window to the foreground
 - **Remembers window position and size** — restored on next launch
@@ -57,7 +58,7 @@ Shortcuts and window settings are stored in:
 
 ```
 %APPDATA%\H7O\Shortcuts\
-├── shortcuts.json    # folder shortcuts
+├── shortcuts.json    # your shortcuts
 └── window.json       # window position and size
 ```
 

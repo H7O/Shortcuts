@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Shortcuts"
         mc:Ignorable="d"
-        Title="Folder Shortcuts" Height="500" Width="420"
+        Title="Shortcuts" Height="500" Width="420"
         MinHeight="300" MinWidth="320"
         WindowStartupLocation="Manual"
         Background="{DynamicResource WindowBackground}"
@@ -18,25 +18,38 @@
 
         <!-- Toolbar -->
         <Border Grid.Row="0" Padding="8" Background="{DynamicResource ToolbarBackground}" BorderBrush="{DynamicResource ToolbarBorder}" BorderThickness="0,0,0,1">
-            <Button x:Name="AddButton" Click="AddButton_Click"
-                    FontSize="14" Padding="12,6" HorizontalAlignment="Left" Cursor="Hand"
-                    Background="{DynamicResource ButtonBackground}"
-                    Foreground="{DynamicResource ButtonForeground}"
-                    BorderBrush="{DynamicResource ButtonBorder}">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBlock Text="Add Folder" FontFamily="Segoe UI" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="AddFolderButton" Click="AddFolderButton_Click"
+                        FontSize="14" Padding="12,6" Cursor="Hand"
+                        Background="{DynamicResource ButtonBackground}"
+                        Foreground="{DynamicResource ButtonForeground}"
+                        BorderBrush="{DynamicResource ButtonBorder}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Add Folder" FontFamily="Segoe UI" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="AddFileButton" Click="AddFileButton_Click"
+                        FontSize="14" Padding="12,6" Margin="8,0,0,0" Cursor="Hand"
+                        Background="{DynamicResource ButtonBackground}"
+                        Foreground="{DynamicResource ButtonForeground}"
+                        BorderBrush="{DynamicResource ButtonBorder}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7C3;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Add File" FontFamily="Segoe UI" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Border>
 
         <!-- Empty state -->
         <TextBlock Grid.Row="1" x:Name="EmptyMessage"
-                   Text="No shortcuts yet. Click 'Add Folder' to get started."
+                   Text="No shortcuts yet. Click 'Add Folder' or 'Add File', or drop items here from Explorer."
+                   TextWrapping="Wrap" TextAlignment="Center" Margin="24,0"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
                    Foreground="{DynamicResource EmptyMessageForeground}" FontSize="14" Visibility="Visible"/>
 
-        <!-- Shortcuts list -->
+        <!-- Shortcuts list. A click on a row opens it; a drag only starts from the row's drag handle. -->
         <ListBox Grid.Row="1" x:Name="ShortcutsList"
                  HorizontalContentAlignment="Stretch"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -44,15 +57,16 @@
                  AllowDrop="True"
                  PreviewMouseLeftButtonDown="ShortcutsList_PreviewMouseLeftButtonDown"
                  PreviewMouseMove="ShortcutsList_PreviewMouseMove"
+                 PreviewMouseLeftButtonUp="ShortcutsList_PreviewMouseLeftButtonUp"
                  Drop="ShortcutsList_Drop"
                  DragOver="ShortcutsList_DragOver"
-                 MouseDoubleClick="ShortcutsList_MouseDoubleClick"
                  Background="Transparent">
             <ListBox.Resources>
                 <Style TargetType="ListBoxItem">
                     <Setter Property="Background" Value="Transparent"/>
                     <Setter Property="Foreground" Value="{DynamicResource TextForeground}"/>
-                    <Setter Property="Padding" Value="4,2"/>
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="Cursor" Value="Hand"/>
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="ListBoxItem">
@@ -77,13 +91,27 @@
             </ListBox.Resources>
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <Grid Margin="4,6">
+                    <Grid>
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <!-- Drag handle. The code-behind finds it by its Tag. -->
+                        <Border Grid.Column="0" Tag="DragHandle" Width="24" Background="Transparent"
+                                Cursor="SizeAll" ToolTip="Drag to reorder">
+                            <Path Data="M0,0h2v2h-2z M5,0h2v2h-2z M0,5h2v2h-2z M5,5h2v2h-2z M0,10h2v2h-2z M5,10h2v2h-2z"
+                                  Fill="{DynamicResource SubtextForeground}" SnapsToDevicePixels="True"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+
+                        <Image Grid.Column="1" Source="{Binding Icon}" Width="32" Height="32"
+                               Margin="2,0,10,0" VerticalAlignment="Center"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,8">
                             <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
                                        Foreground="{DynamicResource TextForeground}"
                                        TextTrimming="CharacterEllipsis"/>
@@ -91,8 +119,8 @@
                                        TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
                         </StackPanel>
 
-                        <Button Grid.Column="1" Content="&#xE74D;" FontFamily="Segoe MDL2 Assets"
-                                FontSize="14" Padding="6,4" VerticalAlignment="Center"
+                        <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe MDL2 Assets"
+                                FontSize="14" Padding="6,4" Margin="4,0,8,0" VerticalAlignment="Center"
                                 Background="Transparent" BorderThickness="0"
                                 Foreground="{DynamicResource DeleteButtonForeground}" Cursor="Hand" ToolTip="Delete shortcut"
                                 Click="DeleteButton_Click"/>

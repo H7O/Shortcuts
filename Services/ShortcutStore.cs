@@ -18,16 +18,16 @@ public class ShortcutStore
         WriteIndented = true
     };
 
-    public List<FolderShortcut> Load()
+    public List<Shortcut> Load()
     {
         if (!File.Exists(FilePath))
             return [];
 
         var json = File.ReadAllText(FilePath);
-        return JsonSerializer.Deserialize<List<FolderShortcut>>(json, JsonOptions) ?? [];
+        return JsonSerializer.Deserialize<List<Shortcut>>(json, JsonOptions) ?? [];
     }
 
-    public void Save(IEnumerable<FolderShortcut> shortcuts)
+    public void Save(IEnumerable<Shortcut> shortcuts)
     {
         Directory.CreateDirectory(AppDataFolder);
         var json = JsonSerializer.Serialize(shortcuts.ToList(), JsonOptions);
