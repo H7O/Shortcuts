@@ -1,6 +1,6 @@
 # Shortcuts
 
-A lightweight Windows desktop app for quick access to your favorite folders and files. Built with C# / WPF / .NET 10.
+A lightweight Windows desktop app for quick access to your favorite folders and files. Built with C# / WPF / .NET 11.
 
 ![Dark mode](https://img.shields.io/badge/dark%20mode-supported-blue)
 ![Single instance](https://img.shields.io/badge/single%20instance-yes-green)
@@ -34,7 +34,7 @@ Extract the zip and run `Shortcuts.exe`. No installation required.
 
 ## Building from Source
 
-Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+Requires the [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0).
 
 ```powershell
 .\build.ps1

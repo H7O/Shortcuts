@@ -2,12 +2,22 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net11.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Workaround for https://github.com/dotnet/wpf/issues/11842. On .NET 11 a WPF app published as a
+       single file crashes at startup, because two of WPF's own assemblies (DirectWriteForwarder.dll and
+       System.Printing.dll) cannot be loaded from inside the bundle. Unpacking the whole bundle to disk
+       on first run avoids that. The SDK warns that this is a legacy mode (NETSDK1244), which is expected
+       here. Remove this whole group once the issue is fixed. -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <NoWarn>$(NoWarn);NETSDK1244</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
