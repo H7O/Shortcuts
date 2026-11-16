@@ -27,7 +27,7 @@ Grab the latest release from the [Releases page](https://github.com/H7O/Shortcut
 - **Shortcuts-win-x64.zip** — for 64-bit Intel/AMD systems (most PCs)
 - **Shortcuts-win-arm64.zip** — for ARM64 devices (e.g. Surface Pro X, Snapdragon laptops)
 
-Extract the zip and run `Shortcuts.exe`. No installation required.
+Extract the zip and run `Shortcuts.exe`. No installation required. The first time you run a new download, Windows can take several seconds to check the file before the window appears. Later starts are quick.
 
 Windows puts new notification icons under the **^** arrow next to the clock. To keep the Shortcuts icon in view, open that panel and drag the icon onto the taskbar.
 
