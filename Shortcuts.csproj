@@ -8,6 +8,8 @@
     <UseWPF>true</UseWPF>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Program.Main runs first, so that a second launch can hand over to the running copy without loading WPF. -->
+    <StartupObject>Shortcuts.Program</StartupObject>
   </PropertyGroup>
 
   <!-- Workaround for https://github.com/dotnet/wpf/issues/11842. On .NET 11 a WPF app published as a

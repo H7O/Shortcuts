@@ -12,6 +12,7 @@ public class ShortcutStore
 
     private static readonly string FilePath = Path.Combine(AppDataFolder, "shortcuts.json");
     private static readonly string SettingsPath = Path.Combine(AppDataFolder, "window.json");
+    private static readonly string AppSettingsPath = Path.Combine(AppDataFolder, "settings.json");
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -48,5 +49,29 @@ public class ShortcutStore
         Directory.CreateDirectory(AppDataFolder);
         var json = JsonSerializer.Serialize(settings, JsonOptions);
         File.WriteAllText(SettingsPath, json);
+    }
+
+    public AppSettings LoadAppSettings()
+    {
+        if (!File.Exists(AppSettingsPath))
+            return new AppSettings();
+
+        try
+        {
+            var json = File.ReadAllText(AppSettingsPath);
+            return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+        }
+        catch (JsonException)
+        {
+            // Nothing in this file is worth refusing to start over. Fall back to the defaults.
+            return new AppSettings();
+        }
+    }
+
+    public void SaveAppSettings(AppSettings settings)
+    {
+        Directory.CreateDirectory(AppDataFolder);
+        var json = JsonSerializer.Serialize(settings, JsonOptions);
+        File.WriteAllText(AppSettingsPath, json);
     }
 }

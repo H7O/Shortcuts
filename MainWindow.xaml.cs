@@ -20,6 +20,10 @@ public partial class MainWindow : Window
     private const string DragHandleTag = "DragHandle";   // matches the Tag on the handle in MainWindow.xaml
     private const int ErrorCancelled = 1223;             // Win32 ERROR_CANCELLED
 
+    // How long after losing the focus the window still counts as the one the user was looking at.
+    // A click on the notification icon takes the focus away a moment before the click is reported.
+    private const int JustNowMilliseconds = 400;
+
     private readonly ShortcutStore _store = new();
     private readonly ObservableCollection<Shortcut> _shortcuts = [];
 
@@ -28,14 +32,18 @@ public partial class MainWindow : Window
     private int _pressIndex = -1;
     private bool _pressOnHandle;
 
+    private long _deactivatedAt;
+    private bool _refreshingIcons;
+    private readonly Size _defaultSize;
+
     public MainWindow()
     {
         InitializeComponent();
+        _defaultSize = new Size(Width, Height);
 
-        var loaded = _store.Load();
-        foreach (var s in loaded)
+        foreach (var s in _store.Load())
             _shortcuts.Add(s);
-        LoadIcons(loaded);
+        RefreshIcons();
 
         ShortcutsList.ItemsSource = _shortcuts;
         _shortcuts.CollectionChanged += (_, _) => UpdateEmptyState();
@@ -45,30 +53,96 @@ public partial class MainWindow : Window
 
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
+        Deactivated += (_, _) => _deactivatedAt = Environment.TickCount64;
+        IsVisibleChanged += MainWindow_IsVisibleChanged;
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        var source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
-        source?.AddHook(WndProc);
-
         ThemeHelper.ApplyTitleBarTheme(this, ThemeHelper.IsDarkMode());
     }
 
-    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg == (int)SingleInstanceHelper.BringToFrontMessage)
-        {
-            if (WindowState == WindowState.Minimized)
-                WindowState = WindowState.Normal;
+    // --- Showing and hiding. The app stays loaded, so the window is put away rather than closed. ---
 
-            Activate();
-            Topmost = true;
-            Topmost = false;
-            Focus();
-            handled = true;
+    /// <summary>Set when the app is really exiting. Until then, closing the window only hides it.</summary>
+    public bool IsExiting { get; set; }
+
+    /// <summary>True if the user is working in the window, or was until a moment ago.</summary>
+    public bool WasActiveJustNow =>
+        IsActive || Environment.TickCount64 - _deactivatedAt < JustNowMilliseconds;
+
+    public void BringToFront()
+    {
+        if (IsExiting)
+            return;
+
+        if (!IsVisible)
+            Show();
+
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+
+        // With a message box or a file picker open, that dialog is what the user has to deal with.
+        var dialog = WindowHelper.GetBlockingDialog(new WindowInteropHelper(this).Handle);
+        if (dialog != IntPtr.Zero)
+        {
+            WindowHelper.Activate(dialog);
+            return;
         }
-        return IntPtr.Zero;
+
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+
+    /// <summary>Shows the window at its default size in the middle of the main screen.</summary>
+    public void ResetPosition()
+    {
+        if (IsExiting)
+            return;
+
+        WindowState = WindowState.Normal;
+        Width = _defaultSize.Width;
+        Height = _defaultSize.Height;
+
+        var area = SystemParameters.WorkArea;
+        Left = area.Left + (area.Width - Width) / 2;
+        Top = area.Top + (area.Height - Height) / 2;
+
+        BringToFront();
+    }
+
+    public void HideToTray()
+    {
+        if (!IsVisible)
+            return;
+
+        SaveWindowSettings();
+        Hide();
+
+        // The next time it is shown it should look freshly opened, not the way it was left.
+        ShortcutsList.SelectedIndex = -1;
+        if (_shortcuts.Count > 0)
+            ShortcutsList.ScrollIntoView(_shortcuts[0]);
+    }
+
+    private void MainWindow_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        // The app can stay loaded for days. A target that was unreachable when its icon was last
+        // looked up, such as a network drive at sign-in, gets its real icon the next time around.
+        if (IsVisible)
+            RefreshIcons();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            HideToTray();
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
     }
 
     private void RestoreWindowPosition()
@@ -113,6 +187,20 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        if (IsExiting)
+            return;
+
+        // The X button puts the window away. The app itself ends from the notification icon's menu.
+        e.Cancel = true;
+        HideToTray();
+    }
+
+    public void SaveWindowSettings()
+    {
+        // A window that was never shown has no position worth saving.
+        if (!IsLoaded)
+            return;
+
         var settings = new Models.WindowSettings
         {
             IsMaximized = WindowState == WindowState.Maximized
@@ -206,7 +294,17 @@ public partial class MainWindow : Window
         return string.IsNullOrEmpty(name) ? path : name;
     }
 
-    private void LoadIcons(IReadOnlyList<Shortcut> shortcuts)
+    /// <summary>Looks up every row's icon again. Does nothing if the last such round is still running.</summary>
+    private void RefreshIcons()
+    {
+        if (_refreshingIcons || _shortcuts.Count == 0)
+            return;
+
+        _refreshingIcons = true;
+        LoadIcons(_shortcuts.ToList(), () => _refreshingIcons = false);
+    }
+
+    private void LoadIcons(IReadOnlyList<Shortcut> shortcuts, Action? whenDone = null)
     {
         // Icon lookups read the disk and can stall on an unreachable network path, so they run
         // off the UI thread. The shell expects to be called from an STA thread.
@@ -225,6 +323,9 @@ public partial class MainWindow : Window
                     // An icon is decoration. A row without one still works, so never let this take the app down.
                 }
             }
+
+            if (whenDone != null)
+                Dispatcher.BeginInvoke(whenDone);
         })
         {
             IsBackground = true
@@ -321,11 +422,11 @@ public partial class MainWindow : Window
         var shortcut = _shortcuts[pressIndex];
         var keepWindowOpen = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
 
-        // Let the list finish handling this click before a message box or Close() interrupts it.
+        // Let the list finish handling this click before a message box or hiding the window interrupts it.
         Dispatcher.BeginInvoke(() =>
         {
             if (Open(shortcut) && !keepWindowOpen)
-                Close();
+                HideToTray();
         });
     }
 
